@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Optimiseur A4 - Page Unique</title>
+  <style>
+    body{
+      font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+      margin:20px; line-height:1.5; background: #f4f7f6; color: #333;
+    }
+    .card {
+      max-width: 650px; margin: auto; background: white; padding: 25px;
+      border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+    }
+    h2 { margin-top: 0; color: #2c3e50; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+    label { display: block; margin-top: 15px; font-weight: bold; font-size: 0.9em; }
+    input, select, button {
+      width: 100%; padding: 12px; margin-top: 5px; border: 1px solid #ddd;
+      border-radius: 8px; box-sizing: border-box; font-size: 1rem;
+    }
+    button {
+      background: #27ae60; color: white; border: none; font-weight: bold;
+      cursor: pointer; margin-top: 25px; transition: 0.2s;
+    }
+    button:hover { background: #219150; }
+    button:disabled { background: #bdc3c7; cursor: not-allowed; }
+    
+    .info {
+      background: #eef2f3; padding: 15px; border-radius: 8px;
+      margin-top: 20px; font-size: 0.85em; color: #7f8c8d;
+    }
+    .preview-container {
+      margin-top: 20px; border: 1px solid #eee; border-radius: 8px;
+      padding: 10px; background: #fafafa; text-align: center;
+    }
+    canvas { max-width: 100%; height: auto; border: 1px solid #ddd; }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <h2>📏 Convertisseur A4</h2>
+  
+  <label>1) Choisir la photo</label>
+  <input id="file" type="file" accept="image/*">
+
+  <label>2) Taille sur la page A4</label>
+  <select id="scale">
+    <option value="1">100% (Pleine page)</option>
+    <option value="0.75">75% de la page</option>
+    <option value="0.5">50% de la page</option>
+    <option value="0.25">25% (Format vignette)</option>
+  </select>
+
+  <label>3) Format du fichier</label>
+  <select id="format">
+    <option value="pdf">Fichier PDF (Prêt à imprimer)</option>
+    <option value="jpeg">Image JPEG (Compressée)</option>
+    <option value="png">Image PNG (Qualité pro)</option>
+  </select>
+
+  <button id="download" disabled>Générer le document</button>
+
+  <div id="info" class="info" style="display:none;"></div>
+
+  <div class="preview-container">
+    <canvas id="c"></canvas>
+  </div>
+</div>
+
+<script>
+  const input = document.getElementById('file');
+  const format = document.getElementById('format');
+  const scale = document.getElementById('scale');
+  const btn = document.getElementById('download');
+  const info = document.getElementById('info');
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+
+  let img = new Image();
+  let fileName = "document";
+
+  // Constantes A4 (base 96 DPI)
+  const A4_W = 794;
+  const A4_H = 1123;
+
+  input.onchange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    fileName = file.name.replace(/\.[^.]+$/,'');
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      img.onload = () => {
+        render();
+        btn.disabled = false;
+        info.style.display = 'block';
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  [format, scale].forEach(el => el.onchange = () => { if(img.src) render(); });
+
+  function render() {
+    const userScale = parseFloat(scale.value);
+    
+    // Détection auto Portrait/Paysage pour la zone A4
+    let limitW = (img.naturalWidth > img.naturalHeight) ? A4_H : A4_W;
+    let limitH = (img.naturalWidth > img.naturalHeight) ? A4_W : A4_H;
+
+    // Calcul du ratio pour l'ajustement "Fit"
+    const ratio = Math.min(limitW / img.naturalWidth, limitH / img.naturalHeight);
+    
+    // Taille finale = (Taille ajustée A4) * (Réduction utilisateur)
+    const finalW = img.naturalWidth * ratio * userScale;
+    const finalH = img.naturalHeight * ratio * userScale;
+
+    canvas.width = finalW;
+    canvas.height = finalH;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, 0, 0, finalW, finalH);
+
+    info.innerHTML = `
+      <strong>Statut :</strong> Ajusté pour une page A4 (${(img.naturalWidth > img.naturalHeight) ? 'Paysage' : 'Portrait'})<br>
+      <strong>Dimensions :</strong> ${Math.round(finalW)} x ${Math.round(finalH)} pixels.
+    `;
+  }
+
+  btn.onclick = () => {
+    if (format.value === 'pdf') {
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      const win = window.open('', '_blank');
+      
+      win.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Impression A4</title>
+          <style>
+            @page { size: A4; margin: 0; }
+            body { 
+              margin: 0; 
+              display: flex; 
+              align-items: center; 
+              justify-content: center; 
+              height: 100vh; 
+              background: #fff;
+            }
+            img { 
+              max-width: 100%; 
+              max-height: 100%; 
+              width: auto; 
+              height: auto; 
+              display: block; 
+            }
+            @media print {
+              body { -webkit-print-color-adjust: exact; }
+              img { max-width: 100%; max-height: 100%; }
+            }
+          </style>
+        </head>
+        <body>
+          <img src="${dataUrl}">
+          <script>
+            window.onload = () => {
+              setTimeout(() => {
+                window.print();
+                window.close();
+              }, 400);
+            };
+          <\/script>
+        </body>
+        </html>
+      `);
+      win.document.close();
+    } else {
+      const mime = (format.value === 'png') ? 'image/png' : 'image/jpeg';
+      const ext = (format.value === 'png') ? 'png' : 'jpg';
+      canvas.toBlob((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${fileName}_redimensionne.${ext}`;
+        a.click();
+      }, mime, 0.8);
+    }
+  };
+</script>
+
+</body>
+</html>
