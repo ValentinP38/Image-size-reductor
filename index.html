@@ -2,76 +2,126 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Réducteur A4 Pro</title>
+  <title>Réducteur A4 - Fix Impression</title>
   <style>
-    :root { --primary: #2563eb; --bg: #f8fafc; }
-    body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); margin: 0; padding: 20px; display: flex; justify-content: center; }
-    .card { background: white; width: 100%; max-width: 500px; padding: 2rem; border-radius: 1rem; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); }
-    h1 { font-size: 1.25rem; margin-top: 0; color: #1e293b; text-align: center; }
-    
-    .field { margin-bottom: 1.2rem; }
-    label { display: block; font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem; color: #475569; }
-    select, input { width: 100%; padding: 0.6rem; border: 1px solid #cbd5e1; border-radius: 0.5rem; font-size: 1rem; }
-    
-    button { 
-      width: 100%; background: var(--primary); color: white; border: none; padding: 0.8rem; 
-      border-radius: 0.5rem; font-weight: 700; cursor: pointer; transition: filter 0.2s;
-    }
-    button:hover { filter: brightness(1.1); }
-    button:disabled { background: #94a3b8; cursor: not-allowed; }
-
-    .preview-box { 
-      margin-top: 1.5rem; border: 2px dashed #e2e8f0; border-radius: 0.5rem; 
-      padding: 10px; min-height: 100px; display: flex; flex-direction: column; align-items: center;
-    }
-    canvas { max-width: 100%; height: auto; background: #fff; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
-    .status { font-size: 0.75rem; color: #64748b; margin-top: 0.5rem; }
+    /* Style de l'interface */
+    body { font-family: sans-serif; background: #f0f0f0; padding: 20px; display: flex; justify-content: center; }
+    .ui-card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); max-width: 450px; width:100%; }
+    select, input, button { width: 100%; padding: 10px; margin: 10px 0; border-radius: 6px; border: 1px solid #ccc; font-size: 1rem; }
+    button { background: #007bff; color: white; font-weight: bold; cursor: pointer; border: none; }
+    button:hover { background: #0056b3; }
+    canvas { display: none; } /* On cache le canvas technique */
+    .preview-info { font-size: 0.8em; color: #666; text-align: center; }
   </style>
 </head>
 <body>
 
-<div class="card">
-  <h1>Optimiseur d'Image A4</h1>
-  
-  <div class="field">
-    <label>1. Charger l'image</label>
-    <input id="file" type="file" accept="image/*">
-  </div>
+<div class="ui-card">
+  <h3>1. Image</h3>
+  <input id="file" type="file" accept="image/*">
 
-  <div class="field">
-    <label>2. Taille sur la feuille</label>
-    <select id="scale">
-      <option value="1">Pleine Page (100%)</option>
-      <option value="0.75">75% de la page</option>
-      <option value="0.5">Moitié (50%)</option>
-      <option value="0.25">Quart (25%)</option>
-    </select>
-  </div>
+  <h3>2. Taille sur la page</h3>
+  <select id="scale">
+    <option value="1">100% (Pleine page)</option>
+    <option value="0.75">75% (Haut-gauche)</option>
+    <option value="0.5">50% (Haut-gauche)</option>
+    <option value="0.25">25% (Haut-gauche)</option>
+  </select>
 
-  <div class="field">
-    <label>3. Format souhaité</label>
-    <select id="format">
-      <option value="pdf">PDF (Prêt à imprimer)</option>
-      <option value="jpeg">Image JPEG (Légère)</option>
-      <option value="png">Image PNG (Qualité)</option>
-    </select>
-  </div>
-
-  <button id="go" disabled>Générer le document</button>
-
-  <div class="preview-box">
-    <canvas id="c"></canvas>
-    <div id="info" class="status">Aucune image sélectionnée</div>
-  </div>
+  <button id="btn" disabled>Imprimer le PDF A4</button>
+  <p class="preview-info" id="status">Prêt</p>
 </div>
 
-<script>
-  const $ = id => document.getElementById(id);
-  const canvas = $('c');
-  const ctx = canvas.getContext('2d');
-  let imgObj = new Image();
-  let rawName = "document";
+<canvas id="c"></canvas>
 
-  // Référence A4 à 300 DPI pour une qualité d'impression pro (2480x3508)
-  // On utilise ici une base de 150 DPI pour
+<script>
+  const fileInput = document.getElementById('file');
+  const scaleSelect = document.getElementById('scale');
+  const btn = document.getElementById('btn');
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  let img = new Image();
+
+  fileInput.onchange = (e) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      img.onload = () => btn.disabled = false;
+      img.src = event.target.result;
+    };
+    reader.readAsDataURL(e.target.files[0]);
+  };
+
+  btn.onclick = () => {
+    const scale = parseFloat(scaleSelect.value);
+    
+    // Calcul de l'orientation
+    const isLandscape = img.naturalWidth > img.naturalHeight;
+    const pageWidth = isLandscape ? 297 : 210;
+    const pageHeight = isLandscape ? 210 : 297;
+
+    // On utilise un canvas haute définition pour l'impression (300 DPI)
+    // 210mm à 300 DPI = ~2480px
+    const dpiFactor = 3.78; // Conversion mm vers px à 96 DPI (standard web)
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    ctx.drawImage(img, 0, 0);
+
+    const imgData = canvas.toDataURL('image/jpeg', 0.9);
+    
+    // Création du document d'impression
+    const printWin = window.open('', '_blank');
+    printWin.document.write(`
+      <html>
+      <head>
+        <style>
+          /* CONFIGURATION IMPRESSION CRITIQUE */
+          @page { 
+            size: ${isLandscape ? 'landscape' : 'portrait'}; 
+            margin: 0; 
+          }
+          html, body { 
+            margin: 0; 
+            padding: 0; 
+            width: ${pageWidth}mm; 
+            height: ${pageHeight}mm; 
+            overflow: hidden;
+          }
+          .page-container {
+            width: ${pageWidth}mm;
+            height: ${pageHeight}mm;
+            position: relative;
+            background: white;
+          }
+          img {
+            position: absolute;
+            top: 0;
+            left: 0;
+            /* On ajuste l'image selon le choix de l'utilisateur */
+            width: ${scale * 100}%;
+            height: auto;
+            max-width: ${pageWidth}mm;
+            max-height: ${pageHeight}mm;
+            object-fit: contain;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="page-container">
+          <img src="${imgData}">
+        </div>
+        <script>
+          window.onload = () => {
+            setTimeout(() => {
+              window.print();
+              window.close();
+            }, 500);
+          };
+        <\/script>
+      </body>
+      </html>
+    `);
+    printWin.document.close();
+  };
+</script>
+</body>
+</html>
