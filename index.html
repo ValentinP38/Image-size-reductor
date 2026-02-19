@@ -2,125 +2,220 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8" />
-  <title>Réducteur A4 - Fix Impression</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Réducteur A4 Pro</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <style>
-    /* Style de l'interface */
-    body { font-family: sans-serif; background: #f0f0f0; padding: 20px; display: flex; justify-content: center; }
-    .ui-card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); max-width: 450px; width:100%; }
-    select, input, button { width: 100%; padding: 10px; margin: 10px 0; border-radius: 6px; border: 1px solid #ccc; font-size: 1rem; }
-    button { background: #007bff; color: white; font-weight: bold; cursor: pointer; border: none; }
-    button:hover { background: #0056b3; }
-    canvas { display: none; } /* On cache le canvas technique */
-    .preview-info { font-size: 0.8em; color: #666; text-align: center; }
+    /* -----------------------------------------------------------------
+       INTERFACE AGRANDIE (~ 4 Pouces de large, gros boutons, gros texte)
+       ----------------------------------------------------------------- */
+    :root {
+      font-size: 18px; /* Texte plus grand par défaut */
+    }
+    
+    body { 
+      font-family: -apple-system, system-ui, sans-serif; 
+      background: #f0f2f5; 
+      margin: 0; 
+      padding: 15px; 
+      display: flex; 
+      justify-content: center; 
+    }
+
+    #app-ui {
+      background: white; 
+      padding: 25px; 
+      border-radius: 16px; 
+      box-shadow: 0 8px 20px rgba(0,0,0,0.1); 
+      width: 100%; 
+      max-width: 380px; /* Exactement ~10cm ou 4 pouces physiques */
+      box-sizing: border-box;
+    }
+
+    h2 { margin-top: 0; color: #1a73e8; border-bottom: 2px solid #e8f0fe; padding-bottom: 12px; font-size: 1.5rem; text-align: center; }
+    label { display: block; font-weight: bold; margin-bottom: 10px; font-size: 1.1rem; color: #333; }
+    
+    input, select, button { 
+      width: 100%; 
+      padding: 16px; /* Grosses zones de clic pour les doigts */
+      border-radius: 10px; 
+      border: 2px solid #ddd; 
+      font-size: 1.1rem; 
+      box-sizing: border-box; 
+      margin-bottom: 20px;
+      background: #fff;
+    }
+    
+    button { 
+      background: #1a73e8; color: white; border: none; font-weight: bold; cursor: pointer; 
+      transition: background 0.2s; font-size: 1.2rem; margin-bottom: 5px;
+    }
+    button:hover { background: #1557b0; }
+    button:disabled { background: #b0cbec; cursor: not-allowed; }
+
+    .status { font-size: 1rem; color: #666; text-align: center; font-style: italic; }
+    
+    #c { display: none; } /* Canvas technique invisible */
+
+    /* -----------------------------------------------------------------
+       LOGIQUE D'IMPRESSION (Fini les bugs de fenêtre annulée)
+       ----------------------------------------------------------------- */
+    #print-zone { display: none; } /* Caché à l'écran normal */
+
+    @media print {
+      /* Quand l'OS lance l'impression, on cache l'App et on montre le document */
+      body { background: white; margin: 0; padding: 0; display: block; }
+      #app-ui { display: none !important; }
+      
+      #print-zone { 
+        display: block !important; 
+        position: absolute; 
+        top: 0; 
+        left: 0; 
+        width: 100%; 
+        height: 100%; 
+      }
+      
+      #print-img {
+        position: absolute;
+        top: 0; 
+        left: 0; /* Alignement strict Haut-Gauche */
+        height: auto;
+        display: block;
+      }
+    }
   </style>
 </head>
 <body>
 
-<div class="ui-card">
-  <h3>1. Image</h3>
-  <input id="file" type="file" accept="image/*">
+<div id="app-ui">
+  <h2>📏 Optimiseur A4</h2>
 
-  <h3>2. Taille sur la page</h3>
+  <label>1. Fichier (Photo ou PDF)</label>
+  <input id="file" type="file" accept="image/*,application/pdf">
+
+  <label>2. Taille (Haut-Gauche)</label>
   <select id="scale">
     <option value="1">100% (Pleine page)</option>
-    <option value="0.75">75% (Haut-gauche)</option>
-    <option value="0.5">50% (Haut-gauche)</option>
-    <option value="0.25">25% (Haut-gauche)</option>
+    <option value="0.75">75% (Réduit)</option>
+    <option value="0.5">50% (Moitié de page)</option>
+    <option value="0.25">25% (Vignette)</option>
   </select>
 
-  <button id="btn" disabled>Imprimer le PDF A4</button>
-  <p class="preview-info" id="status">Prêt</p>
+  <button id="btn" disabled>Imprimer la page</button>
+  <div class="status" id="status">En attente de fichier...</div>
+</div>
+
+<div id="print-zone">
+  <img id="print-img" src="">
 </div>
 
 <canvas id="c"></canvas>
 
 <script>
+  // Initialisation du moteur PDF.js
+  const pdfjsLib = window['pdfjs-dist/build/pdf'];
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
   const fileInput = document.getElementById('file');
   const scaleSelect = document.getElementById('scale');
   const btn = document.getElementById('btn');
   const canvas = document.getElementById('c');
   const ctx = canvas.getContext('2d');
-  let img = new Image();
+  const statusTxt = document.getElementById('status');
+  const printImg = document.getElementById('print-img');
 
-  fileInput.onchange = (e) => {
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      img.onload = () => btn.disabled = false;
-      img.src = event.target.result;
-    };
-    reader.readAsDataURL(e.target.files[0]);
+  let currentImageData = null;
+  let landscapeMode = false;
+
+  fileInput.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    btn.disabled = true;
+    statusTxt.innerText = "Analyse du document...";
+
+    try {
+      if (file.type === "application/pdf") {
+        await processPDF(file);
+      } else {
+        await processImage(file);
+      }
+    } catch (error) {
+      statusTxt.innerText = "Erreur lors de la lecture du fichier.";
+    }
   };
 
+  // Traitement si c'est une Image
+  function processImage(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const img = new Image();
+        img.onload = () => {
+          landscapeMode = img.naturalWidth > img.naturalHeight;
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          ctx.drawImage(img, 0, 0);
+          currentImageData = canvas.toDataURL('image/jpeg', 0.9);
+          ready();
+          resolve();
+        };
+        img.onerror = reject;
+        img.src = ev.target.result;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // Traitement si c'est un PDF (Convertit la page 1 en image)
+  async function processPDF(file) {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+    const page = await pdf.getPage(1);
+    
+    // Zoom 2x pour une excellente qualité à l'impression
+    const viewport = page.getViewport({ scale: 2.0 });
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    landscapeMode = viewport.width > viewport.height;
+
+    await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+    currentImageData = canvas.toDataURL('image/jpeg', 0.9);
+    ready();
+  }
+
+  function ready() {
+    btn.disabled = false;
+    statusTxt.innerText = "Prêt à imprimer !";
+  }
+
+  // Lancement de l'impression
   btn.onclick = () => {
+    if (!currentImageData) return;
+
+    // 1. On applique la réduction (100%, 75%, etc.) sur l'image cachée
     const scale = parseFloat(scaleSelect.value);
-    
-    // Calcul de l'orientation
-    const isLandscape = img.naturalWidth > img.naturalHeight;
-    const pageWidth = isLandscape ? 297 : 210;
-    const pageHeight = isLandscape ? 210 : 297;
+    printImg.style.width = (scale * 100) + "%";
+    printImg.src = currentImageData;
 
-    // On utilise un canvas haute définition pour l'impression (300 DPI)
-    // 210mm à 300 DPI = ~2480px
-    const dpiFactor = 3.78; // Conversion mm vers px à 96 DPI (standard web)
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
-    ctx.drawImage(img, 0, 0);
+    // 2. On indique à l'imprimante l'orientation de la feuille via CSS
+    let styleTag = document.getElementById('dynamic-print-style');
+    if (!styleTag) {
+      styleTag = document.createElement('style');
+      styleTag.id = 'dynamic-print-style';
+      document.head.appendChild(styleTag);
+    }
+    // "margin: 0;" est très important pour éviter les bordures blanches par défaut
+    styleTag.innerHTML = `@page { size: ${landscapeMode ? 'landscape' : 'portrait'}; margin: 0; }`;
 
-    const imgData = canvas.toDataURL('image/jpeg', 0.9);
-    
-    // Création du document d'impression
-    const printWin = window.open('', '_blank');
-    printWin.document.write(`
-      <html>
-      <head>
-        <style>
-          /* CONFIGURATION IMPRESSION CRITIQUE */
-          @page { 
-            size: ${isLandscape ? 'landscape' : 'portrait'}; 
-            margin: 0; 
-          }
-          html, body { 
-            margin: 0; 
-            padding: 0; 
-            width: ${pageWidth}mm; 
-            height: ${pageHeight}mm; 
-            overflow: hidden;
-          }
-          .page-container {
-            width: ${pageWidth}mm;
-            height: ${pageHeight}mm;
-            position: relative;
-            background: white;
-          }
-          img {
-            position: absolute;
-            top: 0;
-            left: 0;
-            /* On ajuste l'image selon le choix de l'utilisateur */
-            width: ${scale * 100}%;
-            height: auto;
-            max-width: ${pageWidth}mm;
-            max-height: ${pageHeight}mm;
-            object-fit: contain;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="page-container">
-          <img src="${imgData}">
-        </div>
-        <script>
-          window.onload = () => {
-            setTimeout(() => {
-              window.print();
-              window.close();
-            }, 500);
-          };
-        <\/script>
-      </body>
-      </html>
-    `);
-    printWin.document.close();
+    // 3. On lance le panneau d'impression natif de l'OS
+    statusTxt.innerText = "Ouverture de l'impression...";
+    setTimeout(() => {
+      window.print();
+      statusTxt.innerText = "Prêt à imprimer !";
+    }, 200); // Petit délai pour laisser le navigateur insérer l'image proprement
   };
 </script>
 </body>
